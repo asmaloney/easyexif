@@ -65,7 +65,10 @@ class EXIFInfo {
   // Check if the value is valid
   template <typename T>
   inline bool isValid(T data) const {
-    static_assert(std::is_arithmetic<T>::value, "T must be numeric");
+    if constexpr (std::is_same<T, std::string>::value) {
+      return !data.empty();
+    }
+
     return data != std::numeric_limits<T>::max();
   }
 
@@ -179,13 +182,6 @@ class EXIFInfo {
 
   EXIFInfo() { clear(); }
 };
-
-// Explicit template for std::string - all other types are numeric and handled
-// above
-template <>
-inline bool EXIFInfo::isValid(std::string data) const {
-  return !data.empty();
-}
 
 }  // namespace easyexif
 
