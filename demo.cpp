@@ -1,4 +1,4 @@
-#include <stdio.h>
+#include <cstdio>
 
 #include "exif.h"
 
@@ -30,7 +30,7 @@ int main(int argc, char *argv[]) {
   easyexif::EXIFInfo result;
   int code = result.parseFrom(buf, fsize);
   delete[] buf;
-  if (code) {
+  if (code != easyexif::ParseError::None) {
     printf("Error parsing EXIF: code %d\n", code);
     return -3;
   }

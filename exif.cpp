@@ -53,7 +53,9 @@ enum DataFormat {
 };
 
 struct Rational {
-  uint32_t numerator, denominator;
+  uint32_t numerator = 0;
+  uint32_t denominator = 0;
+
   operator double() const {
     if (denominator < 1e-20) {
       return 0;
@@ -74,7 +76,6 @@ class IFEntry {
   IFEntry()
       : tag_(0xFF), format_(0xFF), data_(0), length_(0), val_byte_(nullptr) {}
   IFEntry(const IFEntry &) = delete;
-  IFEntry &operator=(const IFEntry &) = delete;
   IFEntry(IFEntry &&other)
       : tag_(other.tag_),
         format_(other.format_),
@@ -88,6 +89,9 @@ class IFEntry {
     other.val_byte_ = nullptr;
   }
   ~IFEntry() { delete_union(); }
+
+  IFEntry &operator=(const IFEntry &) = delete;
+
   unsigned short tag() const { return tag_; }
   void tag(unsigned short tag) { tag_ = tag; }
   unsigned short format() const { return format_; }
@@ -109,11 +113,13 @@ class IFEntry {
       default:
         return false;
     }
+
     delete_union();
     format_ = format;
     new_union();
     return true;
   }
+
   unsigned data() const { return data_; }
   void data(unsigned data) { data_ = data; }
   unsigned length() const { return length_; }
@@ -126,11 +132,11 @@ class IFEntry {
   //
   // - getters are use here to allow future addition
   //   of checks if format is correct
-  byte_vector &val_byte() { return *val_byte_; }
-  ascii_vector &val_string() { return *val_string_; }
-  short_vector &val_short() { return *val_short_; }
-  long_vector &val_long() { return *val_long_; }
-  rational_vector &val_rational() { return *val_rational_; }
+  byte_vector &val_byte() const { return *val_byte_; }
+  ascii_vector &val_string() const { return *val_string_; }
+  short_vector &val_short() const { return *val_short_; }
+  long_vector &val_long() const { return *val_long_; }
+  rational_vector &val_rational() const { return *val_rational_; }
 
  private:
   // Raw fields
@@ -141,7 +147,7 @@ class IFEntry {
 
   // Parsed fields
   union {
-    byte_vector *val_byte_;
+    byte_vector *val_byte_ = nullptr;
     ascii_vector *val_string_;
     short_vector *val_short_;
     long_vector *val_long_;
@@ -167,12 +173,14 @@ class IFEntry {
         val_long_ = nullptr;
         break;
       case 0x5:
+        [[fallthrough]];
       case 0xA:  // signed rational
         delete val_rational_;
         val_rational_ = nullptr;
         break;
       case 0xff:
         break;
+
       default:
         // should not get here
         // should I throw an exception or ...?
@@ -194,11 +202,13 @@ class IFEntry {
         val_long_ = new long_vector();
         break;
       case 0x5:
+        [[fallthrough]];
       case 0xA:  // signed rational
         val_rational_ = new rational_vector();
         break;
       case 0xff:
         break;
+
       default:
         // should not get here
         // should I throw an exception or ...?
@@ -271,8 +281,9 @@ Rational parse<Rational, false>(const unsigned char *buf) {
 template <typename T, bool alignIntel, typename C>
 bool extract_values(C &container, const unsigned char *buf, const unsigned base,
                     const unsigned len, const IFEntry &entry) {
-  const unsigned char *data;
-  uint32_t reversed_data;
+  const unsigned char *data = nullptr;
+  uint32_t reversed_data = 0;
+
   // if data fits into 4 bytes, they are stored directly in
   // the data field in IFEntry
   if (sizeof(T) * entry.length() <= 4) {
@@ -283,6 +294,7 @@ bool extract_values(C &container, const unsigned char *buf, const unsigned base,
       // this reversing works, but is ugly
       unsigned char *rdata = reinterpret_cast<unsigned char *>(&reversed_data);
       unsigned char tmp;
+
       tmp = rdata[0];
       rdata[0] = rdata[3];
       rdata[3] = tmp;
@@ -297,10 +309,12 @@ bool extract_values(C &container, const unsigned char *buf, const unsigned base,
       return false;
     }
   }
+
   container.resize(entry.length());
   for (size_t i = 0; i < entry.length(); ++i) {
     container[i] = parse<T, alignIntel>(data + sizeof(T) * i);
   }
+
   return true;
 }
 
@@ -321,10 +335,10 @@ void parseIFEntryHeader(const unsigned char *buf, unsigned short &tag,
 
 template <bool alignIntel>
 void parseIFEntryHeader(const unsigned char *buf, IFEntry &result) {
-  unsigned short tag;
-  unsigned short format;
-  unsigned length;
-  unsigned data;
+  unsigned short tag = 0;
+  unsigned short format = 0;
+  unsigned length = 0;
+  unsigned data = 0;
 
   parseIFEntryHeader<alignIntel>(buf, tag, format, length, data);
 
@@ -355,6 +369,7 @@ IFEntry parseIFEntry_temp(const unsigned char *buf, const unsigned offs,
         result.tag(0xFF);
       }
       break;
+
     case AsciiStrings:
       // string is basically sequence of uint8_t (well, according to EXIF even
       // uint7_t, but
@@ -370,31 +385,39 @@ IFEntry parseIFEntry_temp(const unsigned char *buf, const unsigned offs,
         result.val_string().resize(result.val_string().length() - 1);
       }
       break;
+
     case UnsignedShort:
       if (!extract_values<uint16_t, alignIntel>(result.val_short(), buf, base,
                                                 len, result)) {
         result.tag(0xFF);
       }
       break;
+
     case UnsignedLong:
       if (!extract_values<uint32_t, alignIntel>(result.val_long(), buf, base,
                                                 len, result)) {
         result.tag(0xFF);
       }
       break;
+
     case UnsignedRational:
+      [[fallthrough]];
     case SignedRational:
       if (!extract_values<Rational, alignIntel>(result.val_rational(), buf,
                                                 base, len, result)) {
         result.tag(0xFF);
       }
       break;
+
     case Undefined:
+      [[fallthrough]];
     case SignedLong:
       break;
+
     default:
       result.tag(0xFF);
   }
+
   return result;
 }
 
@@ -403,9 +426,9 @@ template <typename T>
 T parse_value(const unsigned char *buf, bool alignIntel) {
   if (alignIntel) {
     return parse<T, true>(buf);
-  } else {
-    return parse<T, false>(buf);
   }
+
+  return parse<T, false>(buf);
 }
 
 void parseIFEntryHeader(const unsigned char *buf, bool alignIntel,
@@ -413,9 +436,9 @@ void parseIFEntryHeader(const unsigned char *buf, bool alignIntel,
                         unsigned &length, unsigned &data) {
   if (alignIntel) {
     parseIFEntryHeader<true>(buf, tag, format, length, data);
-  } else {
-    parseIFEntryHeader<false>(buf, tag, format, length, data);
   }
+
+  parseIFEntryHeader<false>(buf, tag, format, length, data);
 }
 
 IFEntry parseIFEntry(const unsigned char *buf, const unsigned offs,
@@ -423,9 +446,8 @@ IFEntry parseIFEntry(const unsigned char *buf, const unsigned offs,
                      const unsigned len) {
   if (alignIntel) {
     return parseIFEntry_temp<true>(buf, offs, base, len);
-  } else {
-    return parseIFEntry_temp<false>(buf, offs, base, len);
   }
+  return parseIFEntry_temp<false>(buf, offs, base, len);
 }
 }  // namespace
 
@@ -435,8 +457,13 @@ IFEntry parseIFEntry(const unsigned char *buf, const unsigned offs,
 easyexif::ParseError easyexif::EXIFInfo::parseFrom(const unsigned char *buf,
                                                    unsigned len) {
   // Sanity check: all JPEG files start with 0xFFD8.
-  if (!buf || len < 4) return easyexif::ParseError::NoJPEG;
-  if (buf[0] != 0xFF || buf[1] != 0xD8) return easyexif::ParseError::NoJPEG;
+  if (!buf || len < 4) {
+    return easyexif::ParseError::NoJPEG;
+  }
+
+  if (buf[0] != 0xFF || buf[1] != 0xD8) {
+    return easyexif::ParseError::NoJPEG;
+  }
 
   // Sanity check: some cameras pad the JPEG image with some bytes at the end.
   // Normally, we should be able to find the JPEG end marker 0xFFD9 at the end
@@ -445,10 +472,15 @@ easyexif::ParseError easyexif::EXIFInfo::parseFrom(const unsigned char *buf,
   // an 0xFFD9 is found. If JPEG end marker 0xFFD9 is not found,
   // then we can be reasonably sure that the buffer is not a JPEG.
   while (len > 2) {
-    if (buf[len - 1] == 0xD9 && buf[len - 2] == 0xFF) break;
+    if (buf[len - 1] == 0xD9 && buf[len - 2] == 0xFF) {
+      break;
+    }
     len--;
   }
-  if (len <= 2) return easyexif::ParseError::NoJPEG;
+
+  if (len <= 2) {
+    return easyexif::ParseError::NoJPEG;
+  }
 
   clear();
 
@@ -465,13 +497,23 @@ easyexif::ParseError easyexif::EXIFInfo::parseFrom(const unsigned char *buf,
   // =========
   //  16 bytes
   unsigned offs = 0;  // current offset into buffer
-  for (offs = 0; offs < len - 1; offs++)
-    if (buf[offs] == 0xFF && buf[offs + 1] == 0xE1) break;
-  if (offs + 4 > len) return easyexif::ParseError::NoEXIF;
+  for (offs = 0; offs < len - 1; offs++) {
+    if (buf[offs] == 0xFF && buf[offs + 1] == 0xE1) {
+      break;
+    }
+  }
+
+  if (offs + 4 > len) {
+    return easyexif::ParseError::NoEXIF;
+  }
+
   offs += 2;
+
   unsigned short section_length = parse_value<uint16_t>(buf + offs, false);
-  if (offs + section_length > len || section_length < 16)
+  if (offs + section_length > len || section_length < 16) {
     return easyexif::ParseError::DataCorrupt;
+  }
+
   offs += 2;
 
   return parseFromEXIFSegment(buf + offs, len - offs);
@@ -515,7 +557,9 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
   if (offs + 8 > len) {
     return easyexif::ParseError::DataCorrupt;
   }
+
   unsigned tiff_header_start = offs;
+
   if (buf[offs] == 'I' && buf[offs + 1] == 'I') {
     alignIntel = true;
   } else {
@@ -525,13 +569,18 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
       return easyexif::ParseError::UnknownByteAlign;
     }
   }
+
   ByteAlign = alignIntel;
   offs += 2;
+
   if (0x2a != parse_value<uint16_t>(buf + offs, alignIntel)) {
     return easyexif::ParseError::DataCorrupt;
   }
+
   offs += 2;
+
   unsigned first_ifd_offset = parse_value<uint32_t>(buf + offs, alignIntel);
+
   offs += first_ifd_offset - 4;
   if (offs >= len) {
     return easyexif::ParseError::DataCorrupt;
@@ -546,17 +595,21 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
   if (offs + 2 > len) {
     return easyexif::ParseError::DataCorrupt;
   }
+
   int num_entries = parse_value<uint16_t>(buf + offs, alignIntel);
   if (offs + 6 + 12 * num_entries > len) {
     return easyexif::ParseError::DataCorrupt;
   }
+
   offs += 2;
+
   unsigned exif_sub_ifd_offset = len;
   unsigned gps_sub_ifd_offset = len;
   while (--num_entries >= 0) {
     IFEntry result =
         parseIFEntry(buf, offs, alignIntel, tiff_header_start, len);
     offs += 12;
+
     switch (result.tag()) {
       case 0x102:
         // Bits per sample
@@ -655,14 +708,18 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
   // typical user might want.
   if (exif_sub_ifd_offset + 4 <= len) {
     offs = exif_sub_ifd_offset;
+
     int num_sub_entries = parse_value<uint16_t>(buf + offs, alignIntel);
     if (offs + 6 + 12 * num_sub_entries > len) {
       return easyexif::ParseError::DataCorrupt;
     }
+
     offs += 2;
+
     while (--num_sub_entries >= 0) {
       IFEntry result =
           parseIFEntry(buf, offs, alignIntel, tiff_header_start, len);
+
       switch (result.tag()) {
         case 0x829a:
           // Exposure time in seconds
@@ -738,7 +795,7 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
             uint16_t data = result.val_short().front();
 
             FlashUnmodified = data;
-            Flash = data & 1;
+            Flash = static_cast<char>(data & 1);
             FlashReturnedLight = (data & 6) >> 1;
             FlashMode = (data & 24) >> 3;
           }
@@ -838,7 +895,7 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
         case 0xa432:
           // Focal length and FStop.
           if (result.isFormat(UnsignedRational)) {
-            int sz = static_cast<unsigned>(result.val_rational().size());
+            auto sz = static_cast<unsigned int>(result.val_rational().size());
             if (sz) LensInfo.FocalLengthMin = result.val_rational()[0];
             if (sz > 1) LensInfo.FocalLengthMax = result.val_rational()[1];
             if (sz > 2) LensInfo.FStopMin = result.val_rational()[2];
@@ -860,6 +917,7 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
           }
           break;
       }
+
       offs += 12;
     }
   }
@@ -868,22 +926,31 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
   // there. Note that it's possible that the GPS SubIFD doesn't exist.
   if (gps_sub_ifd_offset + 4 <= len) {
     offs = gps_sub_ifd_offset;
+
     int num_sub_entries = parse_value<uint16_t>(buf + offs, alignIntel);
     if (offs + 6 + 12 * num_sub_entries > len) {
       return easyexif::ParseError::DataCorrupt;
     }
+
     offs += 2;
+
     while (--num_sub_entries >= 0) {
-      unsigned short tag, format;
-      unsigned length, data;
+      unsigned short tag = 0;
+      unsigned short format = 0;
+      unsigned int length = 0;
+      unsigned int data = 0;
+
       parseIFEntryHeader(buf + offs, alignIntel, tag, format, length, data);
+
       switch (tag) {
         case 1:
           // GPS north or south
           GeoLocation.LatComponents.direction = *(buf + offs + 8);
+
           if (GeoLocation.LatComponents.direction == 0) {
             GeoLocation.LatComponents.direction = '?';
           }
+
           if ('S' == GeoLocation.LatComponents.direction) {
             GeoLocation.Latitude = -GeoLocation.Latitude;
           }
@@ -895,13 +962,17 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
               length == 3) {
             GeoLocation.LatComponents.degrees = parse_value<Rational>(
                 buf + data + tiff_header_start, alignIntel);
+
             GeoLocation.LatComponents.minutes = parse_value<Rational>(
                 buf + data + tiff_header_start + 8, alignIntel);
+
             GeoLocation.LatComponents.seconds = parse_value<Rational>(
                 buf + data + tiff_header_start + 16, alignIntel);
+
             GeoLocation.Latitude = GeoLocation.LatComponents.degrees +
                                    GeoLocation.LatComponents.minutes / 60 +
                                    GeoLocation.LatComponents.seconds / 3600;
+
             if ('S' == GeoLocation.LatComponents.direction) {
               GeoLocation.Latitude = -GeoLocation.Latitude;
             }
@@ -911,9 +982,11 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
         case 3:
           // GPS east or west
           GeoLocation.LonComponents.direction = *(buf + offs + 8);
+
           if (GeoLocation.LonComponents.direction == 0) {
             GeoLocation.LonComponents.direction = '?';
           }
+
           if ('W' == GeoLocation.LonComponents.direction) {
             GeoLocation.Longitude = -GeoLocation.Longitude;
           }
@@ -925,13 +998,17 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
               length == 3) {
             GeoLocation.LonComponents.degrees = parse_value<Rational>(
                 buf + data + tiff_header_start, alignIntel);
+
             GeoLocation.LonComponents.minutes = parse_value<Rational>(
                 buf + data + tiff_header_start + 8, alignIntel);
+
             GeoLocation.LonComponents.seconds = parse_value<Rational>(
                 buf + data + tiff_header_start + 16, alignIntel);
+
             GeoLocation.Longitude = GeoLocation.LonComponents.degrees +
                                     GeoLocation.LonComponents.minutes / 60 +
                                     GeoLocation.LonComponents.seconds / 3600;
+
             if ('W' == GeoLocation.LonComponents.direction)
               GeoLocation.Longitude = -GeoLocation.Longitude;
           }
@@ -940,6 +1017,7 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
         case 5:
           // GPS altitude reference (below or above sea level)
           GeoLocation.AltitudeRef = *(buf + offs + 8);
+
           if (1 == GeoLocation.AltitudeRef) {
             GeoLocation.Altitude = -GeoLocation.Altitude;
           }
@@ -950,6 +1028,7 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
           if (format == UnsignedRational || format == SignedRational) {
             GeoLocation.Altitude = parse_value<Rational>(
                 buf + data + tiff_header_start, alignIntel);
+
             if (1 == GeoLocation.AltitudeRef) {
               GeoLocation.Altitude = -GeoLocation.Altitude;
             }
@@ -964,6 +1043,7 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
           }
           break;
       }
+
       offs += 12;
     }
   }
