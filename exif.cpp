@@ -2,12 +2,9 @@
   exif.cpp  -- A simple ISO C++ library to parse basic EXIF
                information from a JPEG file.
 
-  Copyright (c) 2010-2015 Mayank Lahiri
-  mlahiri@gmail.com
-  Modified work Copyright (c) 2018-2020 Andy Maloney <asmaloney@gmail.com>
+  Copyright (c) 2010-2015 Mayank Lahiri <mlahiri@gmail.com>
+  Modified work Copyright (c) 2018-2023 Andy Maloney <asmaloney@gmail.com>
   All rights reserved (BSD License).
-
-  See exif.h for version history.
 
   Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions are met:
@@ -401,7 +398,7 @@ IFEntry parseIFEntry_temp(const unsigned char *buf, const unsigned offs,
   return result;
 }
 
-// helper functions for convinience
+// helper functions for convenience
 template <typename T>
 T parse_value(const unsigned char *buf, bool alignIntel) {
   if (alignIntel) {
@@ -435,7 +432,8 @@ IFEntry parseIFEntry(const unsigned char *buf, const unsigned offs,
 //
 // Locates the EXIF segment and parses it using parseFromEXIFSegment
 //
-easyexif::ParseError easyexif::EXIFInfo::parseFrom(const unsigned char *buf, unsigned len) {
+easyexif::ParseError easyexif::EXIFInfo::parseFrom(const unsigned char *buf,
+                                                   unsigned len) {
   // Sanity check: all JPEG files start with 0xFFD8.
   if (!buf || len < 4) return easyexif::ParseError::NoJPEG;
   if (buf[0] != 0xFF || buf[1] != 0xD8) return easyexif::ParseError::NoJPEG;
@@ -490,13 +488,17 @@ easyexif::ParseError easyexif::EXIFInfo::parseFrom(const string &data) {
 // PARAM: 'buf' start of the EXIF TIFF, which must be the bytes "Exif\0\0".
 // PARAM: 'len' length of buffer
 //
-easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(const unsigned char *buf,
-                                             unsigned len) {
+easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
+    const unsigned char *buf, unsigned len) {
   bool alignIntel = true;  // byte alignment (defined in EXIF header)
   unsigned offs = 0;       // current offset into buffer
-  if (!buf || len < 6) return easyexif::ParseError::NoEXIF;
+  if (!buf || len < 6) {
+    return easyexif::ParseError::NoEXIF;
+  }
 
-  if (!std::equal(buf, buf + 6, "Exif\0\0")) return easyexif::ParseError::NoEXIF;
+  if (!std::equal(buf, buf + 6, "Exif\0\0")) {
+    return easyexif::ParseError::NoEXIF;
+  }
   offs += 6;
 
   // Now parsing the TIFF header. The first two bytes are either "II" or
@@ -510,24 +512,30 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(const unsigned cha
   //  4 bytes: offset to first IDF
   // -----------------------------
   //  8 bytes
-  if (offs + 8 > len) return easyexif::ParseError::DataCorrupt;
+  if (offs + 8 > len) {
+    return easyexif::ParseError::DataCorrupt;
+  }
   unsigned tiff_header_start = offs;
-  if (buf[offs] == 'I' && buf[offs + 1] == 'I')
+  if (buf[offs] == 'I' && buf[offs + 1] == 'I') {
     alignIntel = true;
-  else {
-    if (buf[offs] == 'M' && buf[offs + 1] == 'M')
+  } else {
+    if (buf[offs] == 'M' && buf[offs + 1] == 'M') {
       alignIntel = false;
-    else
+    } else {
       return easyexif::ParseError::UnknownByteAlign;
+    }
   }
   ByteAlign = alignIntel;
   offs += 2;
-  if (0x2a != parse_value<uint16_t>(buf + offs, alignIntel))
+  if (0x2a != parse_value<uint16_t>(buf + offs, alignIntel)) {
     return easyexif::ParseError::DataCorrupt;
+  }
   offs += 2;
   unsigned first_ifd_offset = parse_value<uint32_t>(buf + offs, alignIntel);
   offs += first_ifd_offset - 4;
-  if (offs >= len) return easyexif::ParseError::DataCorrupt;
+  if (offs >= len) {
+    return easyexif::ParseError::DataCorrupt;
+  }
 
   // Now parsing the first Image File Directory (IFD0, for the main image).
   // An IFD consists of a variable number of 12-byte directory entries. The
@@ -535,9 +543,13 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(const unsigned cha
   // entries in the section. The last 4 bytes of the IFD contain an offset
   // to the next IFD, which means this IFD must contain exactly 6 + 12 * num
   // bytes of data.
-  if (offs + 2 > len) return easyexif::ParseError::DataCorrupt;
+  if (offs + 2 > len) {
+    return easyexif::ParseError::DataCorrupt;
+  }
   int num_entries = parse_value<uint16_t>(buf + offs, alignIntel);
-  if (offs + 6 + 12 * num_entries > len) return easyexif::ParseError::DataCorrupt;
+  if (offs + 6 + 12 * num_entries > len) {
+    return easyexif::ParseError::DataCorrupt;
+  }
   offs += 2;
   unsigned exif_sub_ifd_offset = len;
   unsigned gps_sub_ifd_offset = len;
@@ -644,7 +656,9 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(const unsigned cha
   if (exif_sub_ifd_offset + 4 <= len) {
     offs = exif_sub_ifd_offset;
     int num_sub_entries = parse_value<uint16_t>(buf + offs, alignIntel);
-    if (offs + 6 + 12 * num_sub_entries > len) return easyexif::ParseError::DataCorrupt;
+    if (offs + 6 + 12 * num_sub_entries > len) {
+      return easyexif::ParseError::DataCorrupt;
+    }
     offs += 2;
     while (--num_sub_entries >= 0) {
       IFEntry result =
@@ -796,8 +810,7 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(const unsigned cha
         case 0xa210:
           // EXIF Focal plane resolution unit
           if (result.isFormat(UnsignedShort) && !result.val_short().empty()) {
-            LensInfo.FocalPlaneResolutionUnit =
-                result.val_short().front();
+            LensInfo.FocalPlaneResolutionUnit = result.val_short().front();
           }
           break;
 
@@ -827,8 +840,7 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(const unsigned cha
           if (result.isFormat(UnsignedRational)) {
             int sz = static_cast<unsigned>(result.val_rational().size());
             if (sz) LensInfo.FocalLengthMin = result.val_rational()[0];
-            if (sz > 1)
-              LensInfo.FocalLengthMax = result.val_rational()[1];
+            if (sz > 1) LensInfo.FocalLengthMax = result.val_rational()[1];
             if (sz > 2) LensInfo.FStopMin = result.val_rational()[2];
             if (sz > 3) LensInfo.FStopMax = result.val_rational()[3];
           }
@@ -857,7 +869,9 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(const unsigned cha
   if (gps_sub_ifd_offset + 4 <= len) {
     offs = gps_sub_ifd_offset;
     int num_sub_entries = parse_value<uint16_t>(buf + offs, alignIntel);
-    if (offs + 6 + 12 * num_sub_entries > len) return easyexif::ParseError::DataCorrupt;
+    if (offs + 6 + 12 * num_sub_entries > len) {
+      return easyexif::ParseError::DataCorrupt;
+    }
     offs += 2;
     while (--num_sub_entries >= 0) {
       unsigned short tag, format;
@@ -885,10 +899,9 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(const unsigned cha
                 buf + data + tiff_header_start + 8, alignIntel);
             GeoLocation.LatComponents.seconds = parse_value<Rational>(
                 buf + data + tiff_header_start + 16, alignIntel);
-            GeoLocation.Latitude =
-                GeoLocation.LatComponents.degrees +
-                GeoLocation.LatComponents.minutes / 60 +
-                GeoLocation.LatComponents.seconds / 3600;
+            GeoLocation.Latitude = GeoLocation.LatComponents.degrees +
+                                   GeoLocation.LatComponents.minutes / 60 +
+                                   GeoLocation.LatComponents.seconds / 3600;
             if ('S' == GeoLocation.LatComponents.direction) {
               GeoLocation.Latitude = -GeoLocation.Latitude;
             }
@@ -916,10 +929,9 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(const unsigned cha
                 buf + data + tiff_header_start + 8, alignIntel);
             GeoLocation.LonComponents.seconds = parse_value<Rational>(
                 buf + data + tiff_header_start + 16, alignIntel);
-            GeoLocation.Longitude =
-                GeoLocation.LonComponents.degrees +
-                GeoLocation.LonComponents.minutes / 60 +
-                GeoLocation.LonComponents.seconds / 3600;
+            GeoLocation.Longitude = GeoLocation.LonComponents.degrees +
+                                    GeoLocation.LonComponents.minutes / 60 +
+                                    GeoLocation.LonComponents.seconds / 3600;
             if ('W' == GeoLocation.LonComponents.direction)
               GeoLocation.Longitude = -GeoLocation.Longitude;
           }
