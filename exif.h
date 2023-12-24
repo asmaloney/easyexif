@@ -40,6 +40,15 @@
 
 namespace easyexif {
 
+enum ParseError : int {
+  None = 0,       // Parse was successful
+  NoJPEG = 1982,  // No JPEG markers found in buffer, possibly invalid JPEG file
+  NoEXIF,         // No EXIF header found in JPEG file.
+  UnknownByteAlign,  // Byte alignment specified in EXIF file was unknown (not
+                     // Motorola or Intel).
+  DataCorrupt        // EXIF header was found, but data was corrupted.
+};
+
 //
 // Class responsible for storing and parsing EXIF information from a JPEG blob
 //
@@ -51,13 +60,13 @@ class EXIFInfo {
   // PARAM 'length': The length of the JPEG image.
   // RETURN:  PARSE_EXIF_SUCCESS (0) on succes with 'result' filled out
   //          error code otherwise, as defined by the PARSE_EXIF_ERROR_* macros
-  int parseFrom(const unsigned char *data, unsigned length);
-  int parseFrom(const std::string &data);
+  ParseError parseFrom(const unsigned char *data, unsigned length);
+  ParseError parseFrom(const std::string &data);
 
   // Parsing function for an EXIF segment. This is used internally by
   // parseFrom() but can be called for special cases where only the EXIF section
   // is available (i.e., a blob starting with the bytes "Exif\0\0").
-  int parseFromEXIFSegment(const unsigned char *buf, unsigned len);
+  ParseError parseFromEXIFSegment(const unsigned char *buf, unsigned len);
 
   // Set all data members to default values.
   void clear();
@@ -183,15 +192,29 @@ class EXIFInfo {
   EXIFInfo() { clear(); }
 };
 
-}  // namespace easyexif
-
 // Parse was successful
-#define PARSE_EXIF_SUCCESS                    0
+inline constexpr easyexif::ParseError PARSE_EXIF_SUCCESS
+    [[deprecated("Use easyexif::ParseError::None")]] =
+        easyexif::ParseError::None;
+
 // No JPEG markers found in buffer, possibly invalid JPEG file
-#define PARSE_EXIF_ERROR_NO_JPEG              1982
+inline constexpr easyexif::ParseError PARSE_EXIF_ERROR_NO_JPEG
+    [[deprecated("Use easyexif::ParseError::NoJPEG")]] =
+        easyexif::ParseError::NoJPEG;
+
 // No EXIF header found in JPEG file.
-#define PARSE_EXIF_ERROR_NO_EXIF              1983
+inline constexpr easyexif::ParseError PARSE_EXIF_ERROR_NO_EXIF
+    [[deprecated("Use easyexif::ParseError::NoEXIF")]] =
+        easyexif::ParseError::NoEXIF;
+
 // Byte alignment specified in EXIF file was unknown (not Motorola or Intel).
-#define PARSE_EXIF_ERROR_UNKNOWN_BYTEALIGN    1984
+inline constexpr easyexif::ParseError PARSE_EXIF_ERROR_UNKNOWN_BYTEALIGN
+    [[deprecated("Use easyexif::ParseError::UnknownByteAlign")]] =
+        easyexif::ParseError::UnknownByteAlign;
+
 // EXIF header was found, but data was corrupted.
-#define PARSE_EXIF_ERROR_CORRUPT              1985
+inline constexpr easyexif::ParseError PARSE_EXIF_ERROR_CORRUPT
+    [[deprecated("Use easyexif::ParseError::DataCorrupt")]] =
+        easyexif::ParseError::DataCorrupt;
+
+}  // namespace easyexif

@@ -435,10 +435,10 @@ IFEntry parseIFEntry(const unsigned char *buf, const unsigned offs,
 //
 // Locates the EXIF segment and parses it using parseFromEXIFSegment
 //
-int easyexif::EXIFInfo::parseFrom(const unsigned char *buf, unsigned len) {
+easyexif::ParseError easyexif::EXIFInfo::parseFrom(const unsigned char *buf, unsigned len) {
   // Sanity check: all JPEG files start with 0xFFD8.
-  if (!buf || len < 4) return PARSE_EXIF_ERROR_NO_JPEG;
-  if (buf[0] != 0xFF || buf[1] != 0xD8) return PARSE_EXIF_ERROR_NO_JPEG;
+  if (!buf || len < 4) return easyexif::ParseError::NoJPEG;
+  if (buf[0] != 0xFF || buf[1] != 0xD8) return easyexif::ParseError::NoJPEG;
 
   // Sanity check: some cameras pad the JPEG image with some bytes at the end.
   // Normally, we should be able to find the JPEG end marker 0xFFD9 at the end
@@ -450,7 +450,7 @@ int easyexif::EXIFInfo::parseFrom(const unsigned char *buf, unsigned len) {
     if (buf[len - 1] == 0xD9 && buf[len - 2] == 0xFF) break;
     len--;
   }
-  if (len <= 2) return PARSE_EXIF_ERROR_NO_JPEG;
+  if (len <= 2) return easyexif::ParseError::NoJPEG;
 
   clear();
 
@@ -469,17 +469,17 @@ int easyexif::EXIFInfo::parseFrom(const unsigned char *buf, unsigned len) {
   unsigned offs = 0;  // current offset into buffer
   for (offs = 0; offs < len - 1; offs++)
     if (buf[offs] == 0xFF && buf[offs + 1] == 0xE1) break;
-  if (offs + 4 > len) return PARSE_EXIF_ERROR_NO_EXIF;
+  if (offs + 4 > len) return easyexif::ParseError::NoEXIF;
   offs += 2;
   unsigned short section_length = parse_value<uint16_t>(buf + offs, false);
   if (offs + section_length > len || section_length < 16)
-    return PARSE_EXIF_ERROR_CORRUPT;
+    return easyexif::ParseError::DataCorrupt;
   offs += 2;
 
   return parseFromEXIFSegment(buf + offs, len - offs);
 }
 
-int easyexif::EXIFInfo::parseFrom(const string &data) {
+easyexif::ParseError easyexif::EXIFInfo::parseFrom(const string &data) {
   return parseFrom(reinterpret_cast<const unsigned char *>(data.data()),
                    static_cast<unsigned>(data.length()));
 }
@@ -490,13 +490,13 @@ int easyexif::EXIFInfo::parseFrom(const string &data) {
 // PARAM: 'buf' start of the EXIF TIFF, which must be the bytes "Exif\0\0".
 // PARAM: 'len' length of buffer
 //
-int easyexif::EXIFInfo::parseFromEXIFSegment(const unsigned char *buf,
+easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(const unsigned char *buf,
                                              unsigned len) {
   bool alignIntel = true;  // byte alignment (defined in EXIF header)
   unsigned offs = 0;       // current offset into buffer
-  if (!buf || len < 6) return PARSE_EXIF_ERROR_NO_EXIF;
+  if (!buf || len < 6) return easyexif::ParseError::NoEXIF;
 
-  if (!std::equal(buf, buf + 6, "Exif\0\0")) return PARSE_EXIF_ERROR_NO_EXIF;
+  if (!std::equal(buf, buf + 6, "Exif\0\0")) return easyexif::ParseError::NoEXIF;
   offs += 6;
 
   // Now parsing the TIFF header. The first two bytes are either "II" or
@@ -510,7 +510,7 @@ int easyexif::EXIFInfo::parseFromEXIFSegment(const unsigned char *buf,
   //  4 bytes: offset to first IDF
   // -----------------------------
   //  8 bytes
-  if (offs + 8 > len) return PARSE_EXIF_ERROR_CORRUPT;
+  if (offs + 8 > len) return easyexif::ParseError::DataCorrupt;
   unsigned tiff_header_start = offs;
   if (buf[offs] == 'I' && buf[offs + 1] == 'I')
     alignIntel = true;
@@ -518,16 +518,16 @@ int easyexif::EXIFInfo::parseFromEXIFSegment(const unsigned char *buf,
     if (buf[offs] == 'M' && buf[offs + 1] == 'M')
       alignIntel = false;
     else
-      return PARSE_EXIF_ERROR_UNKNOWN_BYTEALIGN;
+      return easyexif::ParseError::UnknownByteAlign;
   }
   ByteAlign = alignIntel;
   offs += 2;
   if (0x2a != parse_value<uint16_t>(buf + offs, alignIntel))
-    return PARSE_EXIF_ERROR_CORRUPT;
+    return easyexif::ParseError::DataCorrupt;
   offs += 2;
   unsigned first_ifd_offset = parse_value<uint32_t>(buf + offs, alignIntel);
   offs += first_ifd_offset - 4;
-  if (offs >= len) return PARSE_EXIF_ERROR_CORRUPT;
+  if (offs >= len) return easyexif::ParseError::DataCorrupt;
 
   // Now parsing the first Image File Directory (IFD0, for the main image).
   // An IFD consists of a variable number of 12-byte directory entries. The
@@ -535,9 +535,9 @@ int easyexif::EXIFInfo::parseFromEXIFSegment(const unsigned char *buf,
   // entries in the section. The last 4 bytes of the IFD contain an offset
   // to the next IFD, which means this IFD must contain exactly 6 + 12 * num
   // bytes of data.
-  if (offs + 2 > len) return PARSE_EXIF_ERROR_CORRUPT;
+  if (offs + 2 > len) return easyexif::ParseError::DataCorrupt;
   int num_entries = parse_value<uint16_t>(buf + offs, alignIntel);
-  if (offs + 6 + 12 * num_entries > len) return PARSE_EXIF_ERROR_CORRUPT;
+  if (offs + 6 + 12 * num_entries > len) return easyexif::ParseError::DataCorrupt;
   offs += 2;
   unsigned exif_sub_ifd_offset = len;
   unsigned gps_sub_ifd_offset = len;
@@ -644,7 +644,7 @@ int easyexif::EXIFInfo::parseFromEXIFSegment(const unsigned char *buf,
   if (exif_sub_ifd_offset + 4 <= len) {
     offs = exif_sub_ifd_offset;
     int num_sub_entries = parse_value<uint16_t>(buf + offs, alignIntel);
-    if (offs + 6 + 12 * num_sub_entries > len) return PARSE_EXIF_ERROR_CORRUPT;
+    if (offs + 6 + 12 * num_sub_entries > len) return easyexif::ParseError::DataCorrupt;
     offs += 2;
     while (--num_sub_entries >= 0) {
       IFEntry result =
@@ -857,7 +857,7 @@ int easyexif::EXIFInfo::parseFromEXIFSegment(const unsigned char *buf,
   if (gps_sub_ifd_offset + 4 <= len) {
     offs = gps_sub_ifd_offset;
     int num_sub_entries = parse_value<uint16_t>(buf + offs, alignIntel);
-    if (offs + 6 + 12 * num_sub_entries > len) return PARSE_EXIF_ERROR_CORRUPT;
+    if (offs + 6 + 12 * num_sub_entries > len) return easyexif::ParseError::DataCorrupt;
     offs += 2;
     while (--num_sub_entries >= 0) {
       unsigned short tag, format;
@@ -956,7 +956,7 @@ int easyexif::EXIFInfo::parseFromEXIFSegment(const unsigned char *buf,
     }
   }
 
-  return PARSE_EXIF_SUCCESS;
+  return easyexif::ParseError::None;
 }
 
 void easyexif::EXIFInfo::clear() {
