@@ -1,5 +1,5 @@
 CXX=g++
-CXXFLAGS=-O2 -pedantic -Wall -Wextra -ansi -std=c++11
+CXXFLAGS=-O2 -pedantic -Wall -Wextra -ansi -std=c++17
 
 all: demo
 
