@@ -18,7 +18,7 @@ fi
 
 shopt -s nullglob
 for jpeg in test-images/*.jpg; do
-  ACTUAL_OUTPUT=/tmp/`basename $jpeg`.actual
+  ACTUAL_OUTPUT=/tmp/$(basename $jpeg).actual
   DIFF_TEXT=/tmp/diff.txt
 
   ${DEMO_PATH} $jpeg > "${ACTUAL_OUTPUT}"
@@ -27,8 +27,14 @@ for jpeg in test-images/*.jpg; do
   if [[ -s "${DIFF_TEXT}" ]] ; then
     echo "FAILED ON $jpeg"
     cat "${DIFF_TEXT}"
+    HAS_FAILURE=true
   else
     echo "PASS $jpeg"
   fi
   rm "${DIFF_TEXT}"
 done
+
+if [ -n "$HAS_FAILURE" ]; then
+  echo "ERROR One or more tests failed"
+  exit 2
+fi
