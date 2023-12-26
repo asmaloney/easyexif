@@ -458,11 +458,11 @@ easyexif::ParseError easyexif::EXIFInfo::parseFrom(const unsigned char *buf,
                                                    unsigned len) {
   // Sanity check: all JPEG files start with 0xFFD8.
   if (!buf || len < 4) {
-    return easyexif::ParseError::NoJPEG;
+    return ParseError::NoJPEG;
   }
 
   if (buf[0] != 0xFF || buf[1] != 0xD8) {
-    return easyexif::ParseError::NoJPEG;
+    return ParseError::NoJPEG;
   }
 
   // Sanity check: some cameras pad the JPEG image with some bytes at the end.
@@ -479,7 +479,7 @@ easyexif::ParseError easyexif::EXIFInfo::parseFrom(const unsigned char *buf,
   }
 
   if (len <= 2) {
-    return easyexif::ParseError::NoJPEG;
+    return ParseError::NoJPEG;
   }
 
   clear();
@@ -504,14 +504,14 @@ easyexif::ParseError easyexif::EXIFInfo::parseFrom(const unsigned char *buf,
   }
 
   if (offs + 4 > len) {
-    return easyexif::ParseError::NoEXIF;
+    return ParseError::NoEXIF;
   }
 
   offs += 2;
 
   unsigned short section_length = parse_value<uint16_t>(buf + offs, false);
   if (offs + section_length > len || section_length < 16) {
-    return easyexif::ParseError::DataCorrupt;
+    return ParseError::DataCorrupt;
   }
 
   offs += 2;
@@ -535,11 +535,11 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
   bool alignIntel = true;  // byte alignment (defined in EXIF header)
   unsigned offs = 0;       // current offset into buffer
   if (!buf || len < 6) {
-    return easyexif::ParseError::NoEXIF;
+    return ParseError::NoEXIF;
   }
 
   if (!std::equal(buf, buf + 6, "Exif\0\0")) {
-    return easyexif::ParseError::NoEXIF;
+    return ParseError::NoEXIF;
   }
   offs += 6;
 
@@ -555,7 +555,7 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
   // -----------------------------
   //  8 bytes
   if (offs + 8 > len) {
-    return easyexif::ParseError::DataCorrupt;
+    return ParseError::DataCorrupt;
   }
 
   unsigned tiff_header_start = offs;
@@ -566,7 +566,7 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
     if (buf[offs] == 'M' && buf[offs + 1] == 'M') {
       alignIntel = false;
     } else {
-      return easyexif::ParseError::UnknownByteAlign;
+      return ParseError::UnknownByteAlign;
     }
   }
 
@@ -574,7 +574,7 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
   offs += 2;
 
   if (0x2a != parse_value<uint16_t>(buf + offs, alignIntel)) {
-    return easyexif::ParseError::DataCorrupt;
+    return ParseError::DataCorrupt;
   }
 
   offs += 2;
@@ -583,7 +583,7 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
 
   offs += first_ifd_offset - 4;
   if (offs >= len) {
-    return easyexif::ParseError::DataCorrupt;
+    return ParseError::DataCorrupt;
   }
 
   // Now parsing the first Image File Directory (IFD0, for the main image).
@@ -593,12 +593,12 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
   // to the next IFD, which means this IFD must contain exactly 6 + 12 * num
   // bytes of data.
   if (offs + 2 > len) {
-    return easyexif::ParseError::DataCorrupt;
+    return ParseError::DataCorrupt;
   }
 
   int num_entries = parse_value<uint16_t>(buf + offs, alignIntel);
   if (offs + 6 + 12 * num_entries > len) {
-    return easyexif::ParseError::DataCorrupt;
+    return ParseError::DataCorrupt;
   }
 
   offs += 2;
@@ -711,7 +711,7 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
 
     int num_sub_entries = parse_value<uint16_t>(buf + offs, alignIntel);
     if (offs + 6 + 12 * num_sub_entries > len) {
-      return easyexif::ParseError::DataCorrupt;
+      return ParseError::DataCorrupt;
     }
 
     offs += 2;

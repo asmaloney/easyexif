@@ -28,10 +28,10 @@ int main(int argc, char *argv[]) {
 
   // Parse EXIF
   easyexif::EXIFInfo result;
-  int code = result.parseFrom(buf, fsize);
+  easyexif::ParseError code = result.parseFrom(buf, fsize);
   delete[] buf;
   if (code != easyexif::ParseError::None) {
-    printf("Error parsing EXIF: code %d\n", code);
+    printf("Error parsing EXIF: code %d\n", static_cast<int>(code));
     return -3;
   }
 
