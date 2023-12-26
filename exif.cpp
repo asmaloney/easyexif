@@ -925,158 +925,171 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
   // Jump to the GPS SubIFD if it exists and parse all the information
   // there. Note that it's possible that the GPS SubIFD doesn't exist.
   if (gps_sub_ifd_offset + 4 <= len) {
-    offs = gps_sub_ifd_offset;
+    ParseError err = parseGPSFromEXIFSegment(
+        buf, len, alignIntel, gps_sub_ifd_offset, tiff_header_start);
 
-    int num_sub_entries = parse_value<uint16_t>(buf + offs, alignIntel);
-    if (offs + 6 + 12 * num_sub_entries > len) {
-      return easyexif::ParseError::DataCorrupt;
+    if (err != ParseError::None) {
+      return err;
     }
+  }
 
-    offs += 2;
+  return ParseError::None;
+}
 
-    while (--num_sub_entries >= 0) {
-      unsigned short tag = 0;
-      unsigned short format = 0;
-      unsigned int length = 0;
-      unsigned int data = 0;
+easyexif::ParseError easyexif::EXIFInfo::parseGPSFromEXIFSegment(
+    const unsigned char *buf, unsigned int len, bool alignIntel,
+    unsigned int startingOffset, unsigned int tiffHeaderStart) {
+  unsigned int offs = startingOffset;
 
-      parseIFEntryHeader(buf + offs, alignIntel, tag, format, length, data);
+  int num_sub_entries = parse_value<uint16_t>(buf + offs, alignIntel);
+  if (offs + 6 + 12 * num_sub_entries > len) {
+    return ParseError::DataCorrupt;
+  }
 
-      switch (tag) {
-        case 1:
-          // GPS north or south
-          if (offs + 8 > len) {
-            return easyexif::ParseError::DataCorrupt;
+  offs += 2;
+
+  while (--num_sub_entries >= 0) {
+    unsigned short tag = 0;
+    unsigned short format = 0;
+    unsigned int length = 0;
+    unsigned int data = 0;
+
+    parseIFEntryHeader(buf + offs, alignIntel, tag, format, length, data);
+
+    switch (tag) {
+      case 1:
+        // GPS north or south
+        if (offs + 8 > len) {
+          return ParseError::DataCorrupt;
+        }
+
+        GeoLocation.LatComponents.direction = *(buf + offs + 8);
+
+        if (GeoLocation.LatComponents.direction == 0) {
+          GeoLocation.LatComponents.direction = '?';
+        }
+
+        if ('S' == GeoLocation.LatComponents.direction) {
+          GeoLocation.Latitude = -GeoLocation.Latitude;
+        }
+        break;
+
+      case 2:
+        // GPS latitude
+        if ((format == UnsignedRational || format == SignedRational) &&
+            length == 3) {
+          if (data + tiffHeaderStart + 16 > len) {
+            return ParseError::DataCorrupt;
           }
 
-          GeoLocation.LatComponents.direction = *(buf + offs + 8);
+          GeoLocation.LatComponents.degrees =
+              parse_value<Rational>(buf + data + tiffHeaderStart, alignIntel);
 
-          if (GeoLocation.LatComponents.direction == 0) {
-            GeoLocation.LatComponents.direction = '?';
-          }
+          GeoLocation.LatComponents.minutes = parse_value<Rational>(
+              buf + data + tiffHeaderStart + 8, alignIntel);
+
+          GeoLocation.LatComponents.seconds = parse_value<Rational>(
+              buf + data + tiffHeaderStart + 16, alignIntel);
+
+          GeoLocation.Latitude = GeoLocation.LatComponents.degrees +
+                                 GeoLocation.LatComponents.minutes / 60 +
+                                 GeoLocation.LatComponents.seconds / 3600;
 
           if ('S' == GeoLocation.LatComponents.direction) {
             GeoLocation.Latitude = -GeoLocation.Latitude;
           }
-          break;
+        }
+        break;
 
-        case 2:
-          // GPS latitude
-          if ((format == UnsignedRational || format == SignedRational) &&
-              length == 3) {
-            if (data + tiff_header_start + 16 > len) {
-              return easyexif::ParseError::DataCorrupt;
-            }
+      case 3:
+        // GPS east or west
+        if (offs + 8 > len) {
+          return ParseError::DataCorrupt;
+        }
 
-            GeoLocation.LatComponents.degrees = parse_value<Rational>(
-                buf + data + tiff_header_start, alignIntel);
+        GeoLocation.LonComponents.direction = *(buf + offs + 8);
 
-            GeoLocation.LatComponents.minutes = parse_value<Rational>(
-                buf + data + tiff_header_start + 8, alignIntel);
+        if (GeoLocation.LonComponents.direction == 0) {
+          GeoLocation.LonComponents.direction = '?';
+        }
 
-            GeoLocation.LatComponents.seconds = parse_value<Rational>(
-                buf + data + tiff_header_start + 16, alignIntel);
+        if ('W' == GeoLocation.LonComponents.direction) {
+          GeoLocation.Longitude = -GeoLocation.Longitude;
+        }
+        break;
 
-            GeoLocation.Latitude = GeoLocation.LatComponents.degrees +
-                                   GeoLocation.LatComponents.minutes / 60 +
-                                   GeoLocation.LatComponents.seconds / 3600;
-
-            if ('S' == GeoLocation.LatComponents.direction) {
-              GeoLocation.Latitude = -GeoLocation.Latitude;
-            }
-          }
-          break;
-
-        case 3:
-          // GPS east or west
-          if (offs + 8 > len) {
-            return easyexif::ParseError::DataCorrupt;
+      case 4:
+        // GPS longitude
+        if ((format == UnsignedRational || format == SignedRational) &&
+            length == 3) {
+          if (data + tiffHeaderStart + 16 > len) {
+            return ParseError::DataCorrupt;
           }
 
-          GeoLocation.LonComponents.direction = *(buf + offs + 8);
+          GeoLocation.LonComponents.degrees =
+              parse_value<Rational>(buf + data + tiffHeaderStart, alignIntel);
 
-          if (GeoLocation.LonComponents.direction == 0) {
-            GeoLocation.LonComponents.direction = '?';
-          }
+          GeoLocation.LonComponents.minutes = parse_value<Rational>(
+              buf + data + tiffHeaderStart + 8, alignIntel);
 
-          if ('W' == GeoLocation.LonComponents.direction) {
+          GeoLocation.LonComponents.seconds = parse_value<Rational>(
+              buf + data + tiffHeaderStart + 16, alignIntel);
+
+          GeoLocation.Longitude = GeoLocation.LonComponents.degrees +
+                                  GeoLocation.LonComponents.minutes / 60 +
+                                  GeoLocation.LonComponents.seconds / 3600;
+
+          if ('W' == GeoLocation.LonComponents.direction)
             GeoLocation.Longitude = -GeoLocation.Longitude;
-          }
-          break;
+        }
+        break;
 
-        case 4:
-          // GPS longitude
-          if ((format == UnsignedRational || format == SignedRational) &&
-              length == 3) {
-            if (data + tiff_header_start + 16 > len) {
-              return easyexif::ParseError::DataCorrupt;
-            }
+      case 5:
+        // GPS altitude reference (below or above sea level)
+        if (offs + 8 > len) {
+          return ParseError::DataCorrupt;
+        }
 
-            GeoLocation.LonComponents.degrees = parse_value<Rational>(
-                buf + data + tiff_header_start, alignIntel);
+        GeoLocation.AltitudeRef = *(buf + offs + 8);
 
-            GeoLocation.LonComponents.minutes = parse_value<Rational>(
-                buf + data + tiff_header_start + 8, alignIntel);
+        if (1 == GeoLocation.AltitudeRef) {
+          GeoLocation.Altitude = -GeoLocation.Altitude;
+        }
+        break;
 
-            GeoLocation.LonComponents.seconds = parse_value<Rational>(
-                buf + data + tiff_header_start + 16, alignIntel);
-
-            GeoLocation.Longitude = GeoLocation.LonComponents.degrees +
-                                    GeoLocation.LonComponents.minutes / 60 +
-                                    GeoLocation.LonComponents.seconds / 3600;
-
-            if ('W' == GeoLocation.LonComponents.direction)
-              GeoLocation.Longitude = -GeoLocation.Longitude;
-          }
-          break;
-
-        case 5:
-          // GPS altitude reference (below or above sea level)
-          if (offs + 8 > len) {
-            return easyexif::ParseError::DataCorrupt;
+      case 6:
+        // GPS altitude
+        if (format == UnsignedRational || format == SignedRational) {
+          if (data + tiffHeaderStart > len) {
+            return ParseError::DataCorrupt;
           }
 
-          GeoLocation.AltitudeRef = *(buf + offs + 8);
+          GeoLocation.Altitude =
+              parse_value<Rational>(buf + data + tiffHeaderStart, alignIntel);
 
           if (1 == GeoLocation.AltitudeRef) {
             GeoLocation.Altitude = -GeoLocation.Altitude;
           }
-          break;
+        }
+        break;
 
-        case 6:
-          // GPS altitude
-          if (format == UnsignedRational || format == SignedRational) {
-            if (data + tiff_header_start > len) {
-              return easyexif::ParseError::DataCorrupt;
-            }
-
-            GeoLocation.Altitude = parse_value<Rational>(
-                buf + data + tiff_header_start, alignIntel);
-
-            if (1 == GeoLocation.AltitudeRef) {
-              GeoLocation.Altitude = -GeoLocation.Altitude;
-            }
+      case 11:
+        // GPS degree of precision (DOP)
+        if (format == UnsignedRational || format == SignedRational) {
+          if (data + tiffHeaderStart > len) {
+            return ParseError::DataCorrupt;
           }
-          break;
 
-        case 11:
-          // GPS degree of precision (DOP)
-          if (format == UnsignedRational || format == SignedRational) {
-            if (data + tiff_header_start > len) {
-              return easyexif::ParseError::DataCorrupt;
-            }
-
-            GeoLocation.DOP = parse_value<Rational>(
-                buf + data + tiff_header_start, alignIntel);
-          }
-          break;
-      }
-
-      offs += 12;
+          GeoLocation.DOP =
+              parse_value<Rational>(buf + data + tiffHeaderStart, alignIntel);
+        }
+        break;
     }
+
+    offs += 12;
   }
 
-  return easyexif::ParseError::None;
+  return ParseError::None;
 }
 
 void easyexif::EXIFInfo::clear() {

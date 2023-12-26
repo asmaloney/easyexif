@@ -193,6 +193,12 @@ class EXIFInfo {
   } LensInfo;
 
   EXIFInfo() { clear(); }
+
+ private:
+  ParseError parseGPSFromEXIFSegment(const unsigned char *buf, unsigned int len,
+                                     bool alignIntel,
+                                     unsigned int startingOffset,
+                                     unsigned int tiffHeaderStart);
 };
 
 // Parse was successful
