@@ -36,6 +36,7 @@
 #include <cmath>
 #include <limits>
 #include <string>
+#include <tuple>
 
 namespace easyexif {
 
@@ -43,9 +44,12 @@ enum ParseError : int {
   None = 0,       // Parse was successful
   NoJPEG = 1982,  // No JPEG markers found in buffer, possibly invalid JPEG file
   NoEXIF,         // No EXIF header found in JPEG file.
-  UnknownByteAlign,  // Byte alignment specified in EXIF file was unknown (not
-                     // Motorola or Intel).
-  DataCorrupt        // EXIF header was found, but data was corrupted.
+  UnknownByteAlign,   // Byte alignment specified in EXIF file was unknown (not
+                      // Motorola or Intel).
+  EXIFDataCorrupt,    // EXIF data was found, but data was corrupt.
+  TIFFHeaderCorrupt,  // TIFF header was found, but data was corrupt.
+  IFEntryCorrupt,     // IF entry was found, but data was corrupt.
+  GPSDataCorrupt      // GPS data was found, but data was corrupt.
 };
 
 //
@@ -195,10 +199,20 @@ class EXIFInfo {
   EXIFInfo() { clear(); }
 
  private:
-  ParseError parseGPSFromEXIFSegment(const unsigned char *buf, unsigned int len,
-                                     bool alignIntel,
-                                     unsigned int startingOffset,
-                                     unsigned int tiffHeaderStart);
+  ParseError parseTIFFHeader(const unsigned char *buf, unsigned int len,
+                             unsigned int &offset);
+
+  std::tuple<ParseError, unsigned int, unsigned int> parseIFEntries(
+      const unsigned char *buf, unsigned int len, unsigned int startingOffset);
+
+  ParseError parseEXIFSubIFD(const unsigned char *buf, unsigned int len,
+                             unsigned int startingOffset);
+
+  ParseError parseGPSSubIFD(const unsigned char *buf, unsigned int len,
+                            unsigned int startingOffset);
+
+  // keeps track of where our TIFF header starts
+  unsigned int TIFFHeaderStart = 0;
 };
 
 // Parse was successful
@@ -223,7 +237,7 @@ inline constexpr easyexif::ParseError PARSE_EXIF_ERROR_UNKNOWN_BYTEALIGN
 
 // EXIF header was found, but data was corrupted.
 inline constexpr easyexif::ParseError PARSE_EXIF_ERROR_CORRUPT
-    [[deprecated("Use easyexif::ParseError::DataCorrupt")]] =
-        easyexif::ParseError::DataCorrupt;
+    [[deprecated("Use TIFFHeaderCorrupt, IFEntryCorrupt, EXIFDataCorrupt, and "
+                 "GPSDataCorrupt")]] = easyexif::ParseError::EXIFDataCorrupt;
 
 }  // namespace easyexif

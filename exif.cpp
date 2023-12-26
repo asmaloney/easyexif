@@ -511,7 +511,7 @@ easyexif::ParseError easyexif::EXIFInfo::parseFrom(const unsigned char *buf,
 
   unsigned short section_length = parse_value<uint16_t>(buf + offs, false);
   if (offs + section_length > len || section_length < 16) {
-    return ParseError::DataCorrupt;
+    return ParseError::EXIFDataCorrupt;
   }
 
   offs += 2;
@@ -532,8 +532,6 @@ easyexif::ParseError easyexif::EXIFInfo::parseFrom(const string &data) {
 //
 easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
     const unsigned char *buf, unsigned len) {
-  bool alignIntel = true;  // byte alignment (defined in EXIF header)
-  unsigned offs = 0;       // current offset into buffer
   if (!buf || len < 6) {
     return ParseError::NoEXIF;
   }
@@ -541,7 +539,9 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
   if (!std::equal(buf, buf + 6, "Exif\0\0")) {
     return ParseError::NoEXIF;
   }
-  offs += 6;
+
+  // current offset into buffer
+  unsigned offs = 6;
 
   // Now parsing the TIFF header. The first two bytes are either "II" or
   // "MM" for Intel or Motorola byte alignment. Sanity check by parsing
@@ -554,36 +554,10 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
   //  4 bytes: offset to first IDF
   // -----------------------------
   //  8 bytes
-  if (offs + 8 > len) {
-    return ParseError::DataCorrupt;
-  }
+  ParseError errTIFF = parseTIFFHeader(buf, len, offs);
 
-  unsigned tiff_header_start = offs;
-
-  if (buf[offs] == 'I' && buf[offs + 1] == 'I') {
-    alignIntel = true;
-  } else {
-    if (buf[offs] == 'M' && buf[offs + 1] == 'M') {
-      alignIntel = false;
-    } else {
-      return ParseError::UnknownByteAlign;
-    }
-  }
-
-  ByteAlign = alignIntel;
-  offs += 2;
-
-  if (0x2a != parse_value<uint16_t>(buf + offs, alignIntel)) {
-    return ParseError::DataCorrupt;
-  }
-
-  offs += 2;
-
-  unsigned first_ifd_offset = parse_value<uint32_t>(buf + offs, alignIntel);
-
-  offs += first_ifd_offset - 4;
-  if (offs >= len) {
-    return ParseError::DataCorrupt;
+  if (errTIFF != ParseError::None) {
+    return errTIFF;
   }
 
   // Now parsing the first Image File Directory (IFD0, for the main image).
@@ -592,13 +566,89 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
   // entries in the section. The last 4 bytes of the IFD contain an offset
   // to the next IFD, which means this IFD must contain exactly 6 + 12 * num
   // bytes of data.
-  if (offs + 2 > len) {
-    return ParseError::DataCorrupt;
+  auto [errIF, exif_sub_ifd_offset, gps_sub_ifd_offset] =
+      parseIFEntries(buf, len, offs);
+
+  if (errIF != ParseError::None) {
+    return errIF;
   }
 
-  int num_entries = parse_value<uint16_t>(buf + offs, alignIntel);
+  // Jump to the EXIF SubIFD if it exists and parse all the information
+  // there. Note that it's possible that the EXIF SubIFD doesn't exist.
+  // The EXIF SubIFD contains most of the interesting information that a
+  // typical user might want.
+  if (exif_sub_ifd_offset + 4 <= len) {
+    ParseError errEXIF = parseEXIFSubIFD(buf, len, exif_sub_ifd_offset);
+
+    if (errEXIF != ParseError::None) {
+      return errEXIF;
+    }
+  }
+
+  // Jump to the GPS SubIFD if it exists and parse all the information
+  // there. Note that it's possible that the GPS SubIFD doesn't exist.
+  if (gps_sub_ifd_offset + 4 <= len) {
+    ParseError errGPS = parseGPSSubIFD(buf, len, gps_sub_ifd_offset);
+
+    if (errGPS != ParseError::None) {
+      return errGPS;
+    }
+  }
+
+  return ParseError::None;
+}
+
+// Parse TIFF header and return any error.}
+// Also takes the current offset and adjusts it.
+easyexif::ParseError easyexif::EXIFInfo::parseTIFFHeader(
+    const unsigned char *buf, unsigned int len, unsigned int &offset) {
+  if (offset + 8 > len) {
+    return ParseError::TIFFHeaderCorrupt;
+  }
+
+  TIFFHeaderStart = offset;
+
+  if (buf[offset] == 'I' && buf[offset + 1] == 'I') {
+    ByteAlign = true;
+  } else {
+    if (buf[offset] == 'M' && buf[offset + 1] == 'M') {
+      ByteAlign = false;
+    } else {
+      return ParseError::UnknownByteAlign;
+    }
+  }
+
+  offset += 2;
+
+  if (0x2a != parse_value<uint16_t>(buf + offset, ByteAlign)) {
+    return ParseError::TIFFHeaderCorrupt;
+  }
+
+  offset += 2;
+
+  unsigned first_ifd_offset = parse_value<uint32_t>(buf + offset, ByteAlign);
+
+  offset += first_ifd_offset - 4;
+  if (offset >= len) {
+    return ParseError::TIFFHeaderCorrupt;
+  }
+
+  return ParseError::None;
+}
+
+// Parse Image File (IF) entries and return {error, EXIF offset, GPS offset}
+std::tuple<easyexif::ParseError, unsigned int, unsigned int>
+easyexif::EXIFInfo::parseIFEntries(const unsigned char *buf, unsigned int len,
+                                   unsigned int startingOffset) {
+  unsigned int offs = startingOffset;
+
+  if (offs + 2 > len) {
+    return {ParseError::IFEntryCorrupt, 0, 0};
+  }
+
+  int num_entries = parse_value<uint16_t>(buf + offs, ByteAlign);
   if (offs + 6 + 12 * num_entries > len) {
-    return ParseError::DataCorrupt;
+    return {ParseError::IFEntryCorrupt, 0, 0};
   }
 
   offs += 2;
@@ -606,8 +656,7 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
   unsigned exif_sub_ifd_offset = len;
   unsigned gps_sub_ifd_offset = len;
   while (--num_entries >= 0) {
-    IFEntry result =
-        parseIFEntry(buf, offs, alignIntel, tiff_header_start, len);
+    IFEntry result = parseIFEntry(buf, offs, ByteAlign, TIFFHeaderStart, len);
     offs += 12;
 
     switch (result.tag()) {
@@ -692,258 +741,244 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
 
       case 0x8825:
         // GPS IFS offset
-        gps_sub_ifd_offset = tiff_header_start + result.data();
+        gps_sub_ifd_offset = TIFFHeaderStart + result.data();
         break;
 
       case 0x8769:
         // EXIF SubIFD offset
-        exif_sub_ifd_offset = tiff_header_start + result.data();
+        exif_sub_ifd_offset = TIFFHeaderStart + result.data();
         break;
     }
   }
 
-  // Jump to the EXIF SubIFD if it exists and parse all the information
-  // there. Note that it's possible that the EXIF SubIFD doesn't exist.
-  // The EXIF SubIFD contains most of the interesting information that a
-  // typical user might want.
-  if (exif_sub_ifd_offset + 4 <= len) {
-    offs = exif_sub_ifd_offset;
+  return {ParseError::None, exif_sub_ifd_offset, gps_sub_ifd_offset};
+}
 
-    int num_sub_entries = parse_value<uint16_t>(buf + offs, alignIntel);
-    if (offs + 6 + 12 * num_sub_entries > len) {
-      return ParseError::DataCorrupt;
-    }
+// Parse EXIF SubIFD and return any error.
+easyexif::ParseError easyexif::EXIFInfo::parseEXIFSubIFD(
+    const unsigned char *buf, unsigned int len, unsigned int startingOffset) {
+  unsigned int offs = startingOffset;
 
-    offs += 2;
-
-    while (--num_sub_entries >= 0) {
-      IFEntry result =
-          parseIFEntry(buf, offs, alignIntel, tiff_header_start, len);
-
-      switch (result.tag()) {
-        case 0x829a:
-          // Exposure time in seconds
-          if (result.isFormat(UnsignedRational) &&
-              !result.val_rational().empty()) {
-            ExposureTime = result.val_rational().front();
-          }
-          break;
-
-        case 0x829d:
-          // FNumber
-          if (result.isFormat(UnsignedRational) &&
-              !result.val_rational().empty()) {
-            FNumber = result.val_rational().front();
-          }
-          break;
-
-        case 0x8822:
-          // Exposure Program
-          if (result.isFormat(UnsignedShort) && !result.val_short().empty()) {
-            ExposureProgram = result.val_short().front();
-          }
-          break;
-
-        case 0x8827:
-          // ISO Speed Rating
-          if (result.isFormat(UnsignedShort) && !result.val_short().empty()) {
-            ISOSpeedRatings = result.val_short().front();
-          }
-          break;
-
-        case 0x9003:
-          // Original date and time
-          if (result.isFormat(AsciiStrings)) {
-            DateTimeOriginal = result.val_string();
-          }
-          break;
-
-        case 0x9004:
-          // Digitization date and time
-          if (result.isFormat(AsciiStrings)) {
-            DateTimeDigitized = result.val_string();
-          }
-          break;
-
-        case 0x9201:
-          // Shutter speed value
-          if (result.isFormat(SignedRational) &&
-              !result.val_rational().empty()) {
-            ShutterSpeedValue = result.val_rational().front();
-          }
-          break;
-
-        case 0x9204:
-          // Exposure bias value
-          if (result.isFormat(SignedRational) &&
-              !result.val_rational().empty()) {
-            ExposureBiasValue = result.val_rational().front();
-          }
-          break;
-
-        case 0x9206:
-          // Subject distance
-          if (result.isFormat(UnsignedRational) &&
-              !result.val_rational().empty()) {
-            SubjectDistance = result.val_rational().front();
-          }
-          break;
-
-        case 0x9209:
-          // Flash used
-          if (result.isFormat(UnsignedShort) && !result.val_short().empty()) {
-            uint16_t data = result.val_short().front();
-
-            FlashUnmodified = data;
-            Flash = static_cast<char>(data & 1);
-            FlashReturnedLight = (data & 6) >> 1;
-            FlashMode = (data & 24) >> 3;
-          }
-          break;
-
-        case 0x920a:
-          // Focal length
-          if (result.isFormat(UnsignedRational) &&
-              !result.val_rational().empty()) {
-            FocalLength = result.val_rational().front();
-          }
-          break;
-
-        case 0x9207:
-          // Metering mode
-          if (result.isFormat(UnsignedShort) && !result.val_short().empty()) {
-            MeteringMode = result.val_short().front();
-          }
-          break;
-
-        case 0x9291:
-          // Subsecond original time
-          if (result.isFormat(AsciiStrings)) {
-            SubSecTimeOriginal = result.val_string();
-          }
-          break;
-
-        case 0xa001:
-          // Color Space
-          if (result.isFormat(UnsignedShort) && !result.val_short().empty()) {
-            ColorSpace = result.val_short().front();
-          }
-          break;
-
-        case 0xa002:
-          // EXIF Image width
-          if (result.isFormat(UnsignedLong) && !result.val_long().empty()) {
-            ImageWidth = result.val_long().front();
-          } else if (result.isFormat(UnsignedShort) &&
-                     !result.val_short().empty()) {
-            ImageWidth = result.val_short().front();
-          }
-          break;
-
-        case 0xa003:
-          // EXIF Image height
-          if (result.isFormat(UnsignedLong) && !result.val_long().empty()) {
-            ImageHeight = result.val_long().front();
-          } else if (result.isFormat(UnsignedShort) &&
-                     !result.val_short().empty()) {
-            ImageHeight = result.val_short().front();
-          }
-          break;
-
-        case 0xa20e:
-          // EXIF Focal plane X-resolution
-          if (result.isFormat(UnsignedRational)) {
-            LensInfo.FocalPlaneXResolution = result.val_rational()[0];
-          }
-          break;
-
-        case 0xa20f:
-          // EXIF Focal plane Y-resolution
-          if (result.isFormat(UnsignedRational)) {
-            LensInfo.FocalPlaneYResolution = result.val_rational()[0];
-          }
-          break;
-
-        case 0xa210:
-          // EXIF Focal plane resolution unit
-          if (result.isFormat(UnsignedShort) && !result.val_short().empty()) {
-            LensInfo.FocalPlaneResolutionUnit = result.val_short().front();
-          }
-          break;
-
-        case 0xa402:
-          // Exposure mode
-          if (result.isFormat(UnsignedShort) && !result.val_short().empty()) {
-            ExposureMode = result.val_short().front();
-          }
-          break;
-
-        case 0xa403:
-          // White Balance
-          if (result.isFormat(UnsignedShort) && !result.val_short().empty()) {
-            WhiteBalance = result.val_short().front();
-          }
-          break;
-
-        case 0xa405:
-          // Focal length in 35mm film
-          if (result.isFormat(UnsignedShort) && !result.val_short().empty()) {
-            FocalLengthIn35mm = result.val_short().front();
-          }
-          break;
-
-        case 0xa432:
-          // Focal length and FStop.
-          if (result.isFormat(UnsignedRational)) {
-            auto sz = static_cast<unsigned int>(result.val_rational().size());
-            if (sz) LensInfo.FocalLengthMin = result.val_rational()[0];
-            if (sz > 1) LensInfo.FocalLengthMax = result.val_rational()[1];
-            if (sz > 2) LensInfo.FStopMin = result.val_rational()[2];
-            if (sz > 3) LensInfo.FStopMax = result.val_rational()[3];
-          }
-          break;
-
-        case 0xa433:
-          // Lens make.
-          if (result.isFormat(AsciiStrings)) {
-            LensInfo.Make = result.val_string();
-          }
-          break;
-
-        case 0xa434:
-          // Lens model.
-          if (result.isFormat(AsciiStrings)) {
-            LensInfo.Model = result.val_string();
-          }
-          break;
-      }
-
-      offs += 12;
-    }
+  int num_sub_entries = parse_value<uint16_t>(buf + offs, ByteAlign);
+  if (offs + 6 + 12 * num_sub_entries > len) {
+    return ParseError::EXIFDataCorrupt;
   }
 
-  // Jump to the GPS SubIFD if it exists and parse all the information
-  // there. Note that it's possible that the GPS SubIFD doesn't exist.
-  if (gps_sub_ifd_offset + 4 <= len) {
-    ParseError err = parseGPSFromEXIFSegment(
-        buf, len, alignIntel, gps_sub_ifd_offset, tiff_header_start);
+  offs += 2;
 
-    if (err != ParseError::None) {
-      return err;
+  while (--num_sub_entries >= 0) {
+    IFEntry result = parseIFEntry(buf, offs, ByteAlign, TIFFHeaderStart, len);
+
+    switch (result.tag()) {
+      case 0x829a:
+        // Exposure time in seconds
+        if (result.isFormat(UnsignedRational) &&
+            !result.val_rational().empty()) {
+          ExposureTime = result.val_rational().front();
+        }
+        break;
+
+      case 0x829d:
+        // FNumber
+        if (result.isFormat(UnsignedRational) &&
+            !result.val_rational().empty()) {
+          FNumber = result.val_rational().front();
+        }
+        break;
+
+      case 0x8822:
+        // Exposure Program
+        if (result.isFormat(UnsignedShort) && !result.val_short().empty()) {
+          ExposureProgram = result.val_short().front();
+        }
+        break;
+
+      case 0x8827:
+        // ISO Speed Rating
+        if (result.isFormat(UnsignedShort) && !result.val_short().empty()) {
+          ISOSpeedRatings = result.val_short().front();
+        }
+        break;
+
+      case 0x9003:
+        // Original date and time
+        if (result.isFormat(AsciiStrings)) {
+          DateTimeOriginal = result.val_string();
+        }
+        break;
+
+      case 0x9004:
+        // Digitization date and time
+        if (result.isFormat(AsciiStrings)) {
+          DateTimeDigitized = result.val_string();
+        }
+        break;
+
+      case 0x9201:
+        // Shutter speed value
+        if (result.isFormat(SignedRational) && !result.val_rational().empty()) {
+          ShutterSpeedValue = result.val_rational().front();
+        }
+        break;
+
+      case 0x9204:
+        // Exposure bias value
+        if (result.isFormat(SignedRational) && !result.val_rational().empty()) {
+          ExposureBiasValue = result.val_rational().front();
+        }
+        break;
+
+      case 0x9206:
+        // Subject distance
+        if (result.isFormat(UnsignedRational) &&
+            !result.val_rational().empty()) {
+          SubjectDistance = result.val_rational().front();
+        }
+        break;
+
+      case 0x9209:
+        // Flash used
+        if (result.isFormat(UnsignedShort) && !result.val_short().empty()) {
+          uint16_t data = result.val_short().front();
+
+          FlashUnmodified = data;
+          Flash = static_cast<char>(data & 1);
+          FlashReturnedLight = (data & 6) >> 1;
+          FlashMode = (data & 24) >> 3;
+        }
+        break;
+
+      case 0x920a:
+        // Focal length
+        if (result.isFormat(UnsignedRational) &&
+            !result.val_rational().empty()) {
+          FocalLength = result.val_rational().front();
+        }
+        break;
+
+      case 0x9207:
+        // Metering mode
+        if (result.isFormat(UnsignedShort) && !result.val_short().empty()) {
+          MeteringMode = result.val_short().front();
+        }
+        break;
+
+      case 0x9291:
+        // Subsecond original time
+        if (result.isFormat(AsciiStrings)) {
+          SubSecTimeOriginal = result.val_string();
+        }
+        break;
+
+      case 0xa001:
+        // Color Space
+        if (result.isFormat(UnsignedShort) && !result.val_short().empty()) {
+          ColorSpace = result.val_short().front();
+        }
+        break;
+
+      case 0xa002:
+        // EXIF Image width
+        if (result.isFormat(UnsignedLong) && !result.val_long().empty()) {
+          ImageWidth = result.val_long().front();
+        } else if (result.isFormat(UnsignedShort) &&
+                   !result.val_short().empty()) {
+          ImageWidth = result.val_short().front();
+        }
+        break;
+
+      case 0xa003:
+        // EXIF Image height
+        if (result.isFormat(UnsignedLong) && !result.val_long().empty()) {
+          ImageHeight = result.val_long().front();
+        } else if (result.isFormat(UnsignedShort) &&
+                   !result.val_short().empty()) {
+          ImageHeight = result.val_short().front();
+        }
+        break;
+
+      case 0xa20e:
+        // EXIF Focal plane X-resolution
+        if (result.isFormat(UnsignedRational)) {
+          LensInfo.FocalPlaneXResolution = result.val_rational()[0];
+        }
+        break;
+
+      case 0xa20f:
+        // EXIF Focal plane Y-resolution
+        if (result.isFormat(UnsignedRational)) {
+          LensInfo.FocalPlaneYResolution = result.val_rational()[0];
+        }
+        break;
+
+      case 0xa210:
+        // EXIF Focal plane resolution unit
+        if (result.isFormat(UnsignedShort) && !result.val_short().empty()) {
+          LensInfo.FocalPlaneResolutionUnit = result.val_short().front();
+        }
+        break;
+
+      case 0xa402:
+        // Exposure mode
+        if (result.isFormat(UnsignedShort) && !result.val_short().empty()) {
+          ExposureMode = result.val_short().front();
+        }
+        break;
+
+      case 0xa403:
+        // White Balance
+        if (result.isFormat(UnsignedShort) && !result.val_short().empty()) {
+          WhiteBalance = result.val_short().front();
+        }
+        break;
+
+      case 0xa405:
+        // Focal length in 35mm film
+        if (result.isFormat(UnsignedShort) && !result.val_short().empty()) {
+          FocalLengthIn35mm = result.val_short().front();
+        }
+        break;
+
+      case 0xa432:
+        // Focal length and FStop.
+        if (result.isFormat(UnsignedRational)) {
+          auto sz = static_cast<unsigned int>(result.val_rational().size());
+          if (sz) LensInfo.FocalLengthMin = result.val_rational()[0];
+          if (sz > 1) LensInfo.FocalLengthMax = result.val_rational()[1];
+          if (sz > 2) LensInfo.FStopMin = result.val_rational()[2];
+          if (sz > 3) LensInfo.FStopMax = result.val_rational()[3];
+        }
+        break;
+
+      case 0xa433:
+        // Lens make.
+        if (result.isFormat(AsciiStrings)) {
+          LensInfo.Make = result.val_string();
+        }
+        break;
+
+      case 0xa434:
+        // Lens model.
+        if (result.isFormat(AsciiStrings)) {
+          LensInfo.Model = result.val_string();
+        }
+        break;
     }
+
+    offs += 12;
   }
 
   return ParseError::None;
 }
 
-easyexif::ParseError easyexif::EXIFInfo::parseGPSFromEXIFSegment(
-    const unsigned char *buf, unsigned int len, bool alignIntel,
-    unsigned int startingOffset, unsigned int tiffHeaderStart) {
+// Parse GPS SubIFD and return any error.
+easyexif::ParseError easyexif::EXIFInfo::parseGPSSubIFD(
+    const unsigned char *buf, unsigned int len, unsigned int startingOffset) {
   unsigned int offs = startingOffset;
 
-  int num_sub_entries = parse_value<uint16_t>(buf + offs, alignIntel);
+  int num_sub_entries = parse_value<uint16_t>(buf + offs, ByteAlign);
   if (offs + 6 + 12 * num_sub_entries > len) {
-    return ParseError::DataCorrupt;
+    return ParseError::GPSDataCorrupt;
   }
 
   offs += 2;
@@ -954,13 +989,13 @@ easyexif::ParseError easyexif::EXIFInfo::parseGPSFromEXIFSegment(
     unsigned int length = 0;
     unsigned int data = 0;
 
-    parseIFEntryHeader(buf + offs, alignIntel, tag, format, length, data);
+    parseIFEntryHeader(buf + offs, ByteAlign, tag, format, length, data);
 
     switch (tag) {
       case 1:
         // GPS north or south
         if (offs + 8 > len) {
-          return ParseError::DataCorrupt;
+          return ParseError::GPSDataCorrupt;
         }
 
         GeoLocation.LatComponents.direction = *(buf + offs + 8);
@@ -978,18 +1013,18 @@ easyexif::ParseError easyexif::EXIFInfo::parseGPSFromEXIFSegment(
         // GPS latitude
         if ((format == UnsignedRational || format == SignedRational) &&
             length == 3) {
-          if (data + tiffHeaderStart + 16 > len) {
-            return ParseError::DataCorrupt;
+          if (data + TIFFHeaderStart + 16 > len) {
+            return ParseError::GPSDataCorrupt;
           }
 
           GeoLocation.LatComponents.degrees =
-              parse_value<Rational>(buf + data + tiffHeaderStart, alignIntel);
+              parse_value<Rational>(buf + data + TIFFHeaderStart, ByteAlign);
 
           GeoLocation.LatComponents.minutes = parse_value<Rational>(
-              buf + data + tiffHeaderStart + 8, alignIntel);
+              buf + data + TIFFHeaderStart + 8, ByteAlign);
 
           GeoLocation.LatComponents.seconds = parse_value<Rational>(
-              buf + data + tiffHeaderStart + 16, alignIntel);
+              buf + data + TIFFHeaderStart + 16, ByteAlign);
 
           GeoLocation.Latitude = GeoLocation.LatComponents.degrees +
                                  GeoLocation.LatComponents.minutes / 60 +
@@ -1004,7 +1039,7 @@ easyexif::ParseError easyexif::EXIFInfo::parseGPSFromEXIFSegment(
       case 3:
         // GPS east or west
         if (offs + 8 > len) {
-          return ParseError::DataCorrupt;
+          return ParseError::GPSDataCorrupt;
         }
 
         GeoLocation.LonComponents.direction = *(buf + offs + 8);
@@ -1022,18 +1057,18 @@ easyexif::ParseError easyexif::EXIFInfo::parseGPSFromEXIFSegment(
         // GPS longitude
         if ((format == UnsignedRational || format == SignedRational) &&
             length == 3) {
-          if (data + tiffHeaderStart + 16 > len) {
-            return ParseError::DataCorrupt;
+          if (data + TIFFHeaderStart + 16 > len) {
+            return ParseError::GPSDataCorrupt;
           }
 
           GeoLocation.LonComponents.degrees =
-              parse_value<Rational>(buf + data + tiffHeaderStart, alignIntel);
+              parse_value<Rational>(buf + data + TIFFHeaderStart, ByteAlign);
 
           GeoLocation.LonComponents.minutes = parse_value<Rational>(
-              buf + data + tiffHeaderStart + 8, alignIntel);
+              buf + data + TIFFHeaderStart + 8, ByteAlign);
 
           GeoLocation.LonComponents.seconds = parse_value<Rational>(
-              buf + data + tiffHeaderStart + 16, alignIntel);
+              buf + data + TIFFHeaderStart + 16, ByteAlign);
 
           GeoLocation.Longitude = GeoLocation.LonComponents.degrees +
                                   GeoLocation.LonComponents.minutes / 60 +
@@ -1047,7 +1082,7 @@ easyexif::ParseError easyexif::EXIFInfo::parseGPSFromEXIFSegment(
       case 5:
         // GPS altitude reference (below or above sea level)
         if (offs + 8 > len) {
-          return ParseError::DataCorrupt;
+          return ParseError::GPSDataCorrupt;
         }
 
         GeoLocation.AltitudeRef = *(buf + offs + 8);
@@ -1060,12 +1095,12 @@ easyexif::ParseError easyexif::EXIFInfo::parseGPSFromEXIFSegment(
       case 6:
         // GPS altitude
         if (format == UnsignedRational || format == SignedRational) {
-          if (data + tiffHeaderStart > len) {
-            return ParseError::DataCorrupt;
+          if (data + TIFFHeaderStart > len) {
+            return ParseError::GPSDataCorrupt;
           }
 
           GeoLocation.Altitude =
-              parse_value<Rational>(buf + data + tiffHeaderStart, alignIntel);
+              parse_value<Rational>(buf + data + TIFFHeaderStart, ByteAlign);
 
           if (1 == GeoLocation.AltitudeRef) {
             GeoLocation.Altitude = -GeoLocation.Altitude;
@@ -1076,12 +1111,12 @@ easyexif::ParseError easyexif::EXIFInfo::parseGPSFromEXIFSegment(
       case 11:
         // GPS degree of precision (DOP)
         if (format == UnsignedRational || format == SignedRational) {
-          if (data + tiffHeaderStart > len) {
-            return ParseError::DataCorrupt;
+          if (data + TIFFHeaderStart > len) {
+            return ParseError::GPSDataCorrupt;
           }
 
           GeoLocation.DOP =
-              parse_value<Rational>(buf + data + tiffHeaderStart, alignIntel);
+              parse_value<Rational>(buf + data + TIFFHeaderStart, ByteAlign);
         }
         break;
     }
