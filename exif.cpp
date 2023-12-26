@@ -945,6 +945,10 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
       switch (tag) {
         case 1:
           // GPS north or south
+          if (offs + 8 > len) {
+            return easyexif::ParseError::DataCorrupt;
+          }
+
           GeoLocation.LatComponents.direction = *(buf + offs + 8);
 
           if (GeoLocation.LatComponents.direction == 0) {
@@ -960,6 +964,10 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
           // GPS latitude
           if ((format == UnsignedRational || format == SignedRational) &&
               length == 3) {
+            if (data + tiff_header_start + 16 > len) {
+              return easyexif::ParseError::DataCorrupt;
+            }
+
             GeoLocation.LatComponents.degrees = parse_value<Rational>(
                 buf + data + tiff_header_start, alignIntel);
 
@@ -981,6 +989,10 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
 
         case 3:
           // GPS east or west
+          if (offs + 8 > len) {
+            return easyexif::ParseError::DataCorrupt;
+          }
+
           GeoLocation.LonComponents.direction = *(buf + offs + 8);
 
           if (GeoLocation.LonComponents.direction == 0) {
@@ -996,6 +1008,10 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
           // GPS longitude
           if ((format == UnsignedRational || format == SignedRational) &&
               length == 3) {
+            if (data + tiff_header_start + 16 > len) {
+              return easyexif::ParseError::DataCorrupt;
+            }
+
             GeoLocation.LonComponents.degrees = parse_value<Rational>(
                 buf + data + tiff_header_start, alignIntel);
 
@@ -1016,6 +1032,10 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
 
         case 5:
           // GPS altitude reference (below or above sea level)
+          if (offs + 8 > len) {
+            return easyexif::ParseError::DataCorrupt;
+          }
+
           GeoLocation.AltitudeRef = *(buf + offs + 8);
 
           if (1 == GeoLocation.AltitudeRef) {
@@ -1026,6 +1046,10 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
         case 6:
           // GPS altitude
           if (format == UnsignedRational || format == SignedRational) {
+            if (data + tiff_header_start > len) {
+              return easyexif::ParseError::DataCorrupt;
+            }
+
             GeoLocation.Altitude = parse_value<Rational>(
                 buf + data + tiff_header_start, alignIntel);
 
@@ -1038,6 +1062,10 @@ easyexif::ParseError easyexif::EXIFInfo::parseFromEXIFSegment(
         case 11:
           // GPS degree of precision (DOP)
           if (format == UnsignedRational || format == SignedRational) {
+            if (data + tiff_header_start > len) {
+              return easyexif::ParseError::DataCorrupt;
+            }
+
             GeoLocation.DOP = parse_value<Rational>(
                 buf + data + tiff_header_start, alignIntel);
           }
