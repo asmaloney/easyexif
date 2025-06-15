@@ -42,8 +42,8 @@ namespace easyexif {
 
 // Copyright information.
 constexpr char EASYEXIF_COPYRIGHT[] =
-  "Copyright (c) 2010-2015 Mayank Lahiri\n"
-  "Modified work Copyright (c) 2018-2023 Andy Maloney";
+    "Copyright (c) 2010-2015 Mayank Lahiri\n"
+    "Modified work Copyright (c) 2018-2023 Andy Maloney";
 
 enum ParseError : int {
   None = 0,       // Parse was successful
