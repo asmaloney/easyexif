@@ -996,7 +996,7 @@ easyexif::ParseError easyexif::EXIFInfo::parseGPSSubIFD(
     switch (tag) {
       case 1:
         // GPS north or south
-        if (offs + 8 > len) {
+        if (offs + 8 >= len) {
           return ParseError::GPSDataCorrupt;
         }
 
@@ -1015,7 +1015,7 @@ easyexif::ParseError easyexif::EXIFInfo::parseGPSSubIFD(
         // GPS latitude
         if ((format == UnsignedRational || format == SignedRational) &&
             length == 3) {
-          if (data + TIFFHeaderStart + 16 > len) {
+          if (data + TIFFHeaderStart + 24 > len) {
             return ParseError::GPSDataCorrupt;
           }
 
@@ -1040,7 +1040,7 @@ easyexif::ParseError easyexif::EXIFInfo::parseGPSSubIFD(
 
       case 3:
         // GPS east or west
-        if (offs + 8 > len) {
+        if (offs + 8 >= len) {
           return ParseError::GPSDataCorrupt;
         }
 
@@ -1059,7 +1059,7 @@ easyexif::ParseError easyexif::EXIFInfo::parseGPSSubIFD(
         // GPS longitude
         if ((format == UnsignedRational || format == SignedRational) &&
             length == 3) {
-          if (data + TIFFHeaderStart + 16 > len) {
+          if (data + TIFFHeaderStart + 24 > len) {
             return ParseError::GPSDataCorrupt;
           }
 
@@ -1083,7 +1083,7 @@ easyexif::ParseError easyexif::EXIFInfo::parseGPSSubIFD(
 
       case 5:
         // GPS altitude reference (below or above sea level)
-        if (offs + 8 > len) {
+        if (offs + 8 >= len) {
           return ParseError::GPSDataCorrupt;
         }
 
@@ -1097,7 +1097,7 @@ easyexif::ParseError easyexif::EXIFInfo::parseGPSSubIFD(
       case 6:
         // GPS altitude
         if (format == UnsignedRational || format == SignedRational) {
-          if (data + TIFFHeaderStart > len) {
+          if (data + TIFFHeaderStart + 8 > len) {
             return ParseError::GPSDataCorrupt;
           }
 
@@ -1113,7 +1113,7 @@ easyexif::ParseError easyexif::EXIFInfo::parseGPSSubIFD(
       case 11:
         // GPS degree of precision (DOP)
         if (format == UnsignedRational || format == SignedRational) {
-          if (data + TIFFHeaderStart > len) {
+          if (data + TIFFHeaderStart + 8 > len) {
             return ParseError::GPSDataCorrupt;
           }
 
